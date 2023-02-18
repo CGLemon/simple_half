@@ -7,12 +7,13 @@
 static_assert(std::numeric_limits<float>::is_iec559, "Machine must support for IEEE-754.");
 
 enum class FpConvertStatus {
-    kNormal     = 0,
-    kDenormal   = 1,
-    kNotANumber = 1,
-    kInfinite   = 1 << 1,
-    kUnderflow  = 1 << 2,
-    kOverflow   = 1 << 3
+    kNormal     = 1,
+    kZero       = 1 << 1,
+    kDenormal   = 1 << 2,
+    kNotANumber = 1 << 3,
+    kInfinite   = 1 << 4,
+    kUnderflow  = 1 << 5,
+    kOverflow   = 1 << 6
 };
 
 // IEEE 754 float16
@@ -44,13 +45,20 @@ inline FpConvertStatus FloatToHalf(half_float_t &fp16, float fp32) {
     std::memcpy(&buf, &fp32, sizeof(float));
 
     unsigned int sign = (buf>>16) & 0x8000;
-    buf &= 0x7FFFFFFF; // remove the sign
+    buf &= 0x7FFFFFFF; // Remove the sign field.
 
-    if (buf >= 0x7F800000) {
-        fp16 = buf | 0x7C00 | ((buf>0x7F800000) ? (0x200|((buf>>13)&0x3FF)) : 0);
+    if (buf > 0x7F800000) {
+        fp16 = sign | 0x7C00 | (0x200|((buf>>13)&0x3FF));
         return FpConvertStatus::kNotANumber;
     }
+    if (buf == 0x7F800000) {
+        fp16 = sign | 0x7C00;
+        return FpConvertStatus::kInfinite;
+    }
     if (buf >= 0x47800000) {
+        // Overflow case, we always set the half as greatest
+        // number.
+        fp16 = sign | 0x7800 | 0x03ff;
         return FpConvertStatus::kOverflow;
     }
     if (buf >= 0x38800000) {
@@ -69,10 +77,13 @@ inline FpConvertStatus FloatToHalf(half_float_t &fp16, float fp32) {
                    (buf&((static_cast<std::uint32_t>(1)<<i)-1))!=0);
         return FpConvertStatus::kDenormal;
     }
+
+    // Underflow or zero case, we always set the half as zero.
+    fp16 = sign;
     if(buf != 0) {
         return FpConvertStatus::kUnderflow;
     }
-    return FpConvertStatus::kNotANumber;
+    return FpConvertStatus::kZero;
 }
 
 inline FpConvertStatus HalfToFloat(float &fp32, half_float_t fp16) {
@@ -87,4 +98,10 @@ inline FpConvertStatus HalfToFloat(float &fp32, half_float_t fp16) {
 
     std::memcpy(&fp32, &buf, sizeof(float));
     return FpConvertStatus::kNormal;
+}
+
+inline half_float_t GetFp16(float fp32) {
+    half_float_t fp16;
+    FloatToHalf(fp16, fp32);
+    return fp16;
 }
